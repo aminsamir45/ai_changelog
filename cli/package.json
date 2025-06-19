@@ -1,0 +1,41 @@
+{
+  "name": "changelog-ai",
+  "version": "1.0.0",
+  "description": "AI-powered changelog generator CLI tool",
+  "main": "dist/index.js",
+  "bin": {
+    "changelog-ai": "./bin/changelog-ai.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["changelog", "ai", "cli", "git", "automation"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.3",
+    "commander": "^11.1.0",
+    "simple-git": "^3.20.0",
+    "chalk": "^4.1.2",
+    "inquirer": "^8.2.6",
+    "fs-extra": "^11.1.1",
+    "date-fns": "^2.30.0",
+    "ora": "^5.4.1",
+    "boxen": "^5.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/inquirer": "^9.0.7",
+    "@types/fs-extra": "^11.0.4",
+    "typescript": "^5.2.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.5"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+} 
