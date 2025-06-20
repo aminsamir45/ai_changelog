@@ -1,0 +1,41 @@
+{
+  "name": "ai-changelog",
+  "version": "1.0.0",
+  "description": "AI-powered changelog generator with structured workflow",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "changelog:new": "node scripts/changelog.js new",
+    "changelog:validate": "node scripts/changelog.js validate",
+    "changelog:build": "node scripts/changelog.js build",
+    "changelog:clean": "node scripts/changelog.js clean",
+    "prepare": "husky install",
+    "lint": "echo 'Add your linting commands here'",
+    "build": "echo 'Add your build commands here'"
+  },
+  "keywords": [
+    "changelog",
+    "ai",
+    "automation",
+    "git",
+    "release"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "fs-extra": "^11.1.1",
+    "inquirer": "^8.2.6",
+    "chalk": "^4.1.2",
+    "gray-matter": "^4.0.3",
+    "glob": "^10.3.10"
+  },
+  "devDependencies": {
+    "husky": "^8.0.3",
+    "lint-staged": "^13.2.3"
+  },
+  "lint-staged": {
+    "changelog/unreleased/*.md": [
+      "npm run changelog:validate"
+    ]
+  }
+} 

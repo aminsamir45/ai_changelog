@@ -44,6 +44,7 @@ const path = __importStar(require("path"));
 const config_1 = require("../utils/config");
 const git_1 = require("../utils/git");
 const claude_1 = require("../utils/claude");
+const database_1 = require("../utils/database");
 async function generateCommand(options) {
     const spinner = (0, ora_1.default)('Loading configuration...').start();
     try {
@@ -80,7 +81,25 @@ async function generateCommand(options) {
         }
         spinner.text = `Found ${commits.length} commits. Generating changelog with AI...`;
         // Generate changelog with Claude
-        const changelog = await claudeService.generateChangelog(commits, config, options.version);
+        let changelog;
+        try {
+            changelog = await claudeService.generateChangelog(commits, config, options.version);
+        }
+        catch (error) {
+            if (error.toString().includes('authentication_error') || error.toString().includes('401')) {
+                spinner.warn('Claude API authentication failed. Generating mock changelog for demo...');
+                // Generate a mock changelog for demonstration
+                changelog = {
+                    version: options.version,
+                    date: new Date().toISOString().split('T')[0],
+                    categories: {},
+                    rawContent: generateMockChangelog(commits, config, options.version)
+                };
+            }
+            else {
+                throw error;
+            }
+        }
         if (options.dryRun) {
             spinner.succeed('Changelog generated (dry run)');
             console.log('\n' + chalk_1.default.blue.bold('Generated Changelog:'));
@@ -91,7 +110,7 @@ async function generateCommand(options) {
         }
         // Save to file
         spinner.text = 'Saving changelog...';
-        const changelogPath = path.join(process.cwd(), 'CHANGELOG.md');
+        const changelogPath = findChangelogPath();
         let existingContent = '';
         if (await fs.pathExists(changelogPath)) {
             existingContent = await fs.readFile(changelogPath, 'utf-8');
@@ -99,6 +118,15 @@ async function generateCommand(options) {
         // Prepend new changelog to existing content
         const newContent = changelog.rawContent + '\n\n' + existingContent;
         await fs.writeFile(changelogPath, newContent);
+        // Save to database
+        try {
+            const db = new database_1.ChangelogDatabase();
+            await db.saveChangelog(changelog, config.projectName, commits.length);
+            db.close();
+        }
+        catch (dbError) {
+            console.warn(chalk_1.default.yellow('Warning: Could not save to database:'), dbError);
+        }
         spinner.succeed('Changelog generated successfully!');
         // Show summary
         console.log(chalk_1.default.green.bold('\n✅ Changelog saved to CHANGELOG.md'));
@@ -120,5 +148,50 @@ async function generateCommand(options) {
     catch (error) {
         spinner.fail(`Failed to generate changelog: ${error}`);
     }
+}
+function findChangelogPath() {
+    const cwd = process.cwd();
+    // Check if we're in the CLI development directory
+    if (cwd.endsWith('/cli') || cwd.endsWith('\\cli')) {
+        // Go up one directory to find the changelog
+        return path.join(path.dirname(cwd), 'CHANGELOG.md');
+    }
+    // Default: look in current directory
+    return path.join(cwd, 'CHANGELOG.md');
+}
+function generateMockChangelog(commits, config, version) {
+    const date = new Date().toISOString().split('T')[0];
+    const versionHeader = version || 'Latest Changes';
+    let changelog = `## ${versionHeader} - ${date}\n\n`;
+    // Group commits by category
+    const categories = {};
+    commits.forEach(commit => {
+        const message = commit.message;
+        let category = 'chore';
+        // Simple categorization based on commit message
+        if (message.toLowerCase().includes('feat') || message.toLowerCase().includes('add')) {
+            category = 'feat';
+        }
+        else if (message.toLowerCase().includes('fix') || message.toLowerCase().includes('bug')) {
+            category = 'fix';
+        }
+        else if (message.toLowerCase().includes('doc')) {
+            category = 'docs';
+        }
+        else if (message.toLowerCase().includes('refactor')) {
+            category = 'refactor';
+        }
+        if (!categories[category]) {
+            categories[category] = [];
+        }
+        categories[category].push(`- ${message}`);
+    });
+    // Add categories to changelog
+    Object.entries(categories).forEach(([category, items]) => {
+        const categoryLabel = config.categories[category] || `🔧 ${category}`;
+        changelog += `### ${categoryLabel}\n`;
+        changelog += items.join('\n') + '\n\n';
+    });
+    return changelog.trim();
 }
 //# sourceMappingURL=generate.js.map

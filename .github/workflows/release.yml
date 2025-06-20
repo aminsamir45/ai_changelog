@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: 🚀 Create Release
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 📥 Install dependencies
+      run: npm ci
+      
+    - name: 🏷️ Extract version from tag
+      id: version
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        echo "version=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "version_number=${TAG_NAME#v}" >> $GITHUB_OUTPUT
+        
+    - name: 🔍 Validate changelog entries
+      run: npm run changelog:validate
+      
+    - name: 📋 Build consolidated changelog
+      id: changelog
+      run: |
+        # Build the changelog for this version
+        npm run changelog:build ${{ steps.version.outputs.version }}
+        
+        # Extract the new section for release notes
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Get the changelog section for this version
+        RELEASE_NOTES=$(awk "/^## $VERSION/{flag=1; next} /^## /{flag=0} flag" CHANGELOG.md)
+        
+        # Save release notes to file
+        echo "$RELEASE_NOTES" > release-notes.md
+        
+        # Also save as output (truncated for GitHub)
+        echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+        echo "$RELEASE_NOTES" | head -20 >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: 🧹 Clean unreleased entries
+      run: npm run changelog:clean
+      
+    - name: 📝 Commit changelog updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add the updated changelog
+        git add CHANGELOG.md
+        
+        # Remove unreleased entries
+        git add changelog/unreleased/
+        
+        # Commit if there are changes
+        if ! git diff --staged --quiet; then
+          git commit -m "chore: update changelog for ${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+        fi
+        
+    - name: 🏗️ Build release artifacts
+      run: |
+        npm run build
+        
+        # Create release archive
+        tar -czf release-${{ steps.version.outputs.version }}.tar.gz \
+          --exclude=node_modules \
+          --exclude=.git \
+          --exclude=*.log \
+          .
+          
+    - name: 📦 Create GitHub Release
+      uses: actions/create-release@v1
+      id: create_release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        release_name: Release ${{ steps.version.outputs.version }}
+        body_path: release-notes.md
+        draft: false
+        prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        
+    - name: 📎 Upload Release Archive
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: ai-changelog-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+        
+    - name: 📢 Post-release notifications
+      run: |
+        echo "🎉 Release ${{ steps.version.outputs.version }} created successfully!"
+        echo "📋 Changelog updated and unreleased entries cleaned"
+        echo "🔗 Release URL: ${{ steps.create_release.outputs.html_url }}"
+        
+        # You can add additional notifications here:
+        # - Slack webhook
+        # - Discord webhook  
+        # - Email notifications
+        # - Package registry publishing
+        
+    # Optional: Deploy specific release artifacts
+    - name: 🚀 Deploy release
+      run: |
+        echo "Add your release deployment commands here"
+        # Examples:
+        # - Deploy to production environment
+        # - Publish to npm/package registries
+        # - Update documentation sites
+        # - Notify deployment services 

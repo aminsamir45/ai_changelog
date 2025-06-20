@@ -1,0 +1,22 @@
+{
+  "projectName": "AI Changelog Generator",
+  "claudeApiKey": "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",
+  "projectSlug": "ai-changelog-generator",
+  "defaultSince": "last-tag",
+  "format": "markdown",
+  "categories": {
+    "feat": "✨ New Features",
+    "fix": "🐛 Bug Fixes",
+    "docs": "📝 Documentation",
+    "refactor": "🔧 Internal Changes",
+    "style": "💄 Style Changes",
+    "test": "🧪 Tests",
+    "chore": "🔧 Maintenance"
+  },
+  "excludePatterns": [
+    "merge",
+    "bump version",
+    "release"
+  ],
+  "includeFileChanges": true
+} 

@@ -1,0 +1,134 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo "${BLUE}🔍 Pre-commit validation...${NC}"
+
+# Check if this is a merge commit
+if git rev-parse --verify MERGE_HEAD >/dev/null 2>&1; then
+  echo "${YELLOW}⚠️ Merge commit detected, skipping changelog validation${NC}"
+  exit 0
+fi
+
+# Get list of staged files
+STAGED_FILES=$(git diff --cached --name-only)
+
+# Check if any staged files require a changelog
+REQUIRES_CHANGELOG=false
+
+# File patterns that require changelog entries
+CHANGELOG_REQUIRED_PATTERNS=(
+  "^src/"
+  "^lib/"
+  "^api/"
+  "^cli/"
+  "package\.json$"
+  "^public/"
+  "^components/"
+  "\.js$"
+  "\.ts$"
+  "\.jsx$"
+  "\.tsx$"
+  "\.py$"
+  "\.go$"
+  "\.rs$"
+  "\.java$"
+)
+
+# Skip patterns (files that don't require changelog)
+SKIP_PATTERNS=(
+  "^\..*"           # Hidden files
+  "\.md$"           # Markdown files (except if they're API docs)
+  "\.txt$"          # Text files
+  "test/"           # Test files
+  "spec/"           # Spec files
+  "__tests__/"      # Test directories
+  "\.test\."        # Test files
+  "\.spec\."        # Spec files
+  "^docs/"          # Documentation
+  "^scripts/"       # Build/utility scripts
+  "\.config\."      # Config files
+  "\.json$"         # JSON files (except package.json)
+  "\.lock$"         # Lock files
+  "\.log$"          # Log files
+)
+
+# Function to check if file should require changelog
+should_require_changelog() {
+  local file="$1"
+  
+  # Skip if file matches skip patterns
+  for pattern in "${SKIP_PATTERNS[@]}"; do
+    if echo "$file" | grep -qE "$pattern"; then
+      return 1  # Don't require changelog
+    fi
+  done
+  
+  # Check if file matches patterns that require changelog
+  for pattern in "${CHANGELOG_REQUIRED_PATTERNS[@]}"; do
+    if echo "$file" | grep -qE "$pattern"; then
+      return 0  # Require changelog
+    fi
+  done
+  
+  return 1  # Don't require changelog by default
+}
+
+# Check staged files
+echo "${BLUE}📁 Checking staged files for changelog requirements...${NC}"
+
+for file in $STAGED_FILES; do
+  if should_require_changelog "$file"; then
+    echo "${YELLOW}   📄 $file (requires changelog)${NC}"
+    REQUIRES_CHANGELOG=true
+  fi
+done
+
+# Check if changelog entry exists
+CHANGELOG_FILES=$(find changelog/unreleased -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+
+if [ "$REQUIRES_CHANGELOG" = true ]; then
+  if [ "$CHANGELOG_FILES" -eq 0 ]; then
+    echo "${RED}❌ Changelog entry required!${NC}"
+    echo ""
+    echo "${YELLOW}Your changes affect public behavior but no changelog entry was found.${NC}"
+    echo ""
+    echo "${BLUE}To create a changelog entry:${NC}"
+    echo "   npm run changelog:new"
+    echo ""
+    echo "${BLUE}To skip this check (use sparingly):${NC}"
+    echo "   git commit --no-verify"
+    echo ""
+    exit 1
+  else
+    echo "${GREEN}✅ Found $CHANGELOG_FILES changelog entry(ies)${NC}"
+  fi
+else
+  echo "${GREEN}✅ No changelog required for these changes${NC}"
+fi
+
+# Validate existing changelog entries
+if [ "$CHANGELOG_FILES" -gt 0 ]; then
+  echo "${BLUE}📝 Validating changelog entries...${NC}"
+  
+  if ! npm run changelog:validate --silent; then
+    echo "${RED}❌ Changelog validation failed!${NC}"
+    echo ""
+    echo "${YELLOW}Please fix the validation errors above.${NC}"
+    echo ""
+    exit 1
+  fi
+  
+  echo "${GREEN}✅ All changelog entries are valid${NC}"
+fi
+
+# Run lint-staged for other validations
+npx lint-staged
+
+echo "${GREEN}✅ Pre-commit validation passed!${NC}" 

@@ -22,21 +22,41 @@ class GitAnalyzer {
             if (since === 'last-tag') {
                 fromRef = await this.getLastTag();
             }
-            const logOptions = {
-                from: fromRef,
-                to: 'HEAD',
-                format: {
-                    hash: '%H',
-                    date: '%ai',
-                    message: '%s',
-                    author_name: '%an',
-                    author_email: '%ae'
+            // Try different approaches to get commits
+            let log;
+            try {
+                // First try with from/to range
+                const logOptions = {
+                    from: fromRef,
+                    to: 'HEAD',
+                    format: {
+                        hash: '%H',
+                        date: '%ai',
+                        message: '%s',
+                        author_name: '%an',
+                        author_email: '%ae'
+                    }
+                };
+                if (maxCount) {
+                    logOptions.maxCount = maxCount;
                 }
-            };
-            if (maxCount) {
-                logOptions.maxCount = maxCount;
+                log = await this.git.log(logOptions);
             }
-            const log = await this.git.log(logOptions);
+            catch (rangeError) {
+                // If range fails, try getting recent commits
+                console.warn('Range query failed, getting recent commits instead');
+                const logOptions = {
+                    maxCount: maxCount || 10,
+                    format: {
+                        hash: '%H',
+                        date: '%ai',
+                        message: '%s',
+                        author_name: '%an',
+                        author_email: '%ae'
+                    }
+                };
+                log = await this.git.log(logOptions);
+            }
             const commits = [];
             for (const commit of log.all) {
                 const files = await this.getChangedFiles(commit.hash);
@@ -58,14 +78,15 @@ class GitAnalyzer {
         try {
             const tags = await this.git.tags(['--sort=-version:refname']);
             if (tags.all.length === 0) {
-                // If no tags, get commits from beginning
-                const firstCommit = await this.git.log(['--reverse', '-1']);
-                return firstCommit.all[0]?.hash || 'HEAD~10';
+                // If no tags, return a reference that will get all commits
+                console.warn('No git tags found, analyzing all commits');
+                return 'HEAD~100'; // Get last 100 commits if no tags
             }
             return tags.latest || tags.all[0];
         }
         catch (error) {
-            throw new Error(`Failed to get last tag: ${error}`);
+            console.warn('Could not get git tags, defaulting to recent commits');
+            return 'HEAD~10';
         }
     }
     async getChangedFiles(commitHash) {

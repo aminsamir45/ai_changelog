@@ -5,7 +5,8 @@ import * as path from 'path';
 import { loadConfig } from '../utils/config';
 import { GitAnalyzer } from '../utils/git';
 import { ClaudeService } from '../utils/claude';
-import { GenerateOptions } from '../types';
+import { ChangelogDatabase } from '../utils/database';
+import { GenerateOptions, CommitInfo, Config } from '../types';
 
 export async function generateCommand(options: GenerateOptions): Promise<void> {
   const spinner = ora('Loading configuration...').start();
@@ -54,7 +55,24 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
     spinner.text = `Found ${commits.length} commits. Generating changelog with AI...`;
     
     // Generate changelog with Claude
-    const changelog = await claudeService.generateChangelog(commits, config, options.version);
+    let changelog;
+    try {
+      changelog = await claudeService.generateChangelog(commits, config, options.version);
+    } catch (error: any) {
+      if (error.toString().includes('authentication_error') || error.toString().includes('401')) {
+        spinner.warn('Claude API authentication failed. Generating mock changelog for demo...');
+        
+        // Generate a mock changelog for demonstration
+        changelog = {
+          version: options.version,
+          date: new Date().toISOString().split('T')[0],
+          categories: {},
+          rawContent: generateMockChangelog(commits, config, options.version)
+        };
+      } else {
+        throw error;
+      }
+    }
     
     if (options.dryRun) {
       spinner.succeed('Changelog generated (dry run)');
@@ -67,7 +85,7 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
 
     // Save to file
     spinner.text = 'Saving changelog...';
-    const changelogPath = path.join(process.cwd(), 'CHANGELOG.md');
+    const changelogPath = findChangelogPath();
     
     let existingContent = '';
     if (await fs.pathExists(changelogPath)) {
@@ -77,6 +95,15 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
     // Prepend new changelog to existing content
     const newContent = changelog.rawContent + '\n\n' + existingContent;
     await fs.writeFile(changelogPath, newContent);
+
+    // Save to database
+    try {
+      const db = new ChangelogDatabase();
+      await db.saveChangelog(changelog, config.projectName, commits.length);
+      db.close();
+    } catch (dbError) {
+      console.warn(chalk.yellow('Warning: Could not save to database:'), dbError);
+    }
 
     spinner.succeed('Changelog generated successfully!');
     
@@ -102,4 +129,58 @@ export async function generateCommand(options: GenerateOptions): Promise<void> {
   } catch (error) {
     spinner.fail(`Failed to generate changelog: ${error}`);
   }
+}
+
+function findChangelogPath(): string {
+  const cwd = process.cwd();
+  
+  // Check if we're in the CLI development directory
+  if (cwd.endsWith('/cli') || cwd.endsWith('\\cli')) {
+    // Go up one directory to find the changelog
+    return path.join(path.dirname(cwd), 'CHANGELOG.md');
+  }
+  
+  // Default: look in current directory
+  return path.join(cwd, 'CHANGELOG.md');
+}
+
+function generateMockChangelog(commits: CommitInfo[], config: Config, version?: string): string {
+  const date = new Date().toISOString().split('T')[0];
+  const versionHeader = version || 'Latest Changes';
+  
+  let changelog = `## ${versionHeader} - ${date}\n\n`;
+  
+  // Group commits by category
+  const categories: Record<string, string[]> = {};
+  
+  commits.forEach(commit => {
+    const message = commit.message;
+    let category = 'chore';
+    
+    // Simple categorization based on commit message
+    if (message.toLowerCase().includes('feat') || message.toLowerCase().includes('add')) {
+      category = 'feat';
+    } else if (message.toLowerCase().includes('fix') || message.toLowerCase().includes('bug')) {
+      category = 'fix';
+    } else if (message.toLowerCase().includes('doc')) {
+      category = 'docs';
+    } else if (message.toLowerCase().includes('refactor')) {
+      category = 'refactor';
+    }
+    
+    if (!categories[category]) {
+      categories[category] = [];
+    }
+    
+    categories[category].push(`- ${message}`);
+  });
+  
+  // Add categories to changelog
+  Object.entries(categories).forEach(([category, items]) => {
+    const categoryLabel = config.categories[category] || `🔧 ${category}`;
+    changelog += `### ${categoryLabel}\n`;
+    changelog += items.join('\n') + '\n\n';
+  });
+  
+  return changelog.trim();
 } 

@@ -1,0 +1,178 @@
+name: Main Branch CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: 🔍 Validate & Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 📥 Install dependencies
+      run: npm ci
+      
+    - name: 🔍 Validate changelog entries
+      run: npm run changelog:validate
+      
+    - name: 🧹 Lint code
+      run: npm run lint
+      
+    - name: 🧪 Run tests
+      run: npm test
+      
+    - name: 🏗️ Build project
+      run: npm run build
+
+  changelog-check:
+    name: 📋 Changelog Enforcement
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Need full history to compare
+        
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 📥 Install dependencies
+      run: npm ci
+      
+    - name: 🔍 Check for changelog requirement
+      run: |
+        # Get list of changed files
+        CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+        
+        # File patterns that require changelog entries
+        REQUIRES_CHANGELOG=false
+        
+        # Check each changed file
+        for file in $CHANGED_FILES; do
+          if [[ "$file" =~ ^(src|lib|api|cli)/ ]] || \
+             [[ "$file" == "package.json" ]] || \
+             [[ "$file" =~ \.(js|ts|jsx|tsx|py|go|rs|java)$ ]]; then
+            # Skip test files and docs
+            if [[ ! "$file" =~ (test|spec|__tests__|\.test\.|\.spec\.|^docs/) ]]; then
+              echo "📄 $file requires changelog"
+              REQUIRES_CHANGELOG=true
+            fi
+          fi
+        done
+        
+        # Check if changelog entry exists
+        CHANGELOG_COUNT=$(find changelog/unreleased -name "*.md" 2>/dev/null | wc -l)
+        
+        if [ "$REQUIRES_CHANGELOG" = "true" ] && [ "$CHANGELOG_COUNT" -eq 0 ]; then
+          echo "❌ This PR modifies public behavior but has no changelog entry"
+          echo ""
+          echo "Please create a changelog entry:"
+          echo "  npm run changelog:new"
+          echo ""
+          echo "Changed files requiring changelog:"
+          for file in $CHANGED_FILES; do
+            if [[ "$file" =~ ^(src|lib|api|cli)/ ]] || \
+               [[ "$file" == "package.json" ]] || \
+               [[ "$file" =~ \.(js|ts|jsx|tsx|py|go|rs|java)$ ]]; then
+              if [[ ! "$file" =~ (test|spec|__tests__|\.test\.|\.spec\.|^docs/) ]]; then
+                echo "  - $file"
+              fi
+            fi
+          done
+          exit 1
+        fi
+        
+        echo "✅ Changelog check passed"
+
+  deploy:
+    name: 🚀 Deploy
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: 📥 Install dependencies
+      run: npm ci
+      
+    - name: 🏗️ Build for production
+      run: npm run build
+      
+    - name: 📋 Generate changelog site
+      run: |
+        # Create a simple changelog site
+        mkdir -p dist/changelog
+        
+        # Copy main changelog
+        cp CHANGELOG.md dist/changelog/
+        
+        # Generate HTML version
+        cat > dist/changelog/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Changelog - AI Changelog Generator</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+            h1, h2, h3 { color: #333; }
+            h2 { border-bottom: 1px solid #eee; padding-bottom: 10px; }
+            code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
+            pre { background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
+            .category { margin: 20px 0; }
+            .category h3 { margin-bottom: 10px; }
+            ul { padding-left: 20px; }
+            li { margin: 5px 0; }
+          </style>
+        </head>
+        <body>
+          <div id="content"></div>
+          <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+          <script>
+            fetch('./CHANGELOG.md')
+              .then(response => response.text())
+              .then(markdown => {
+                document.getElementById('content').innerHTML = marked.parse(markdown);
+              });
+          </script>
+        </body>
+        </html>
+        EOF
+        
+    - name: 🌐 Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      if: github.ref == 'refs/heads/main'
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist/changelog
+        destination_dir: changelog
+        
+    # Add your own deployment steps here
+    # - name: 🚀 Deploy to production
+    #   run: echo "Add your deployment commands here" 
