@@ -5,4 +5,9 @@ export function greetUser(name) {
 
 export function calculateSum(a, b) {
   return a + b;
+}
+
+// New function that requires a changelog entry
+export function multiplyNumbers(x, y) {
+  return x * y;
 } 
